@@ -11,5 +11,6 @@ dependencies:
 
 test:
   override:
-    - stack test --jobs=1
+    - stack build --jobs=1
+    # - stack test --jobs=1
 
