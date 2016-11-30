@@ -1,0 +1,43 @@
+name: tapfiliate-api
+version: 0.1.0
+synopsis: Tapfiliate HTTP client
+description: Please see README.md
+maintainer: Ian Duncan <ian@iankduncan.com>
+license: BSD3
+github: iand675/tapfiliate
+category: Web
+
+ghc-options: -Wall -Werror
+default-extensions:
+  - NoImplicitPrelude
+  - OverloadedStrings
+  - RecordWildCards
+
+dependencies:
+  - base >= 4.9 && < 5
+  - protolude
+
+library:
+  source-dirs: src
+  dependencies:
+    - aeson
+    - bytestring
+    - hashable
+    - http-api-data
+    - http-client
+    - http-client-tls
+    - http-media
+    - servant
+    - servant-client
+    - template-haskell
+    - text
+    - time
+    - unordered-containers
+
+tests:
+  consul-api-tests:
+    main: Main.hs
+    source-dirs: tests
+    dependencies:
+      - tapfiliate-api
+      - tasty

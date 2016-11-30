@@ -1,0 +1,9 @@
+resolver: lts-7.9
+
+packages:
+  - .
+
+extra-deps:
+  - servant-0.9.1.1
+  - servant-client-0.9.1.1
+  - http-api-data-0.3.2

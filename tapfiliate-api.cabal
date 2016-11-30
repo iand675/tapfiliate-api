@@ -1,0 +1,60 @@
+-- This file has been generated from package.yaml by hpack version 0.15.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           tapfiliate-api
+version:        0.1.0
+synopsis:       Tapfiliate HTTP client
+description:    Please see README.md
+category:       Web
+homepage:       https://github.com/iand675/tapfiliate#readme
+bug-reports:    https://github.com/iand675/tapfiliate/issues
+maintainer:     Ian Duncan <ian@iankduncan.com>
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+cabal-version:  >= 1.10
+
+source-repository head
+  type: git
+  location: https://github.com/iand675/tapfiliate
+
+library
+  hs-source-dirs:
+      src
+  default-extensions: NoImplicitPrelude OverloadedStrings RecordWildCards
+  ghc-options: -Wall -Werror
+  build-depends:
+      base >= 4.9 && < 5
+    , protolude
+    , aeson
+    , bytestring
+    , hashable
+    , http-api-data
+    , http-client
+    , http-client-tls
+    , http-media
+    , servant
+    , servant-client
+    , template-haskell
+    , text
+    , time
+    , unordered-containers
+  exposed-modules:
+      Network.Tapfiliate
+      Network.Tapfiliate.Internal
+  default-language: Haskell2010
+
+test-suite consul-api-tests
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  hs-source-dirs:
+      tests
+  default-extensions: NoImplicitPrelude OverloadedStrings RecordWildCards
+  ghc-options: -Wall -Werror
+  build-depends:
+      base >= 4.9 && < 5
+    , protolude
+    , tapfiliate-api
+    , tasty
+  default-language: Haskell2010
