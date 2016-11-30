@@ -4,449 +4,440 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Network.Tapfiliate
   ( API
   , api
   , mkClient
-  , ConsulClient(..)
-  , ConsulM
-  , NodeName(..)
-  , Peer(..)
-  , KeyPath(..)
-  , KeyPathPiece(..)
-  , keyPath
-  , runConsul
-  -- * ACLs
-  -- createACLToken
-  -- updateACLToken
-  -- destroyACLToken
-  -- getACLToken
-  -- cloneACLToken
-  -- listACLTokens
-  -- getACLReplicationStatus
-  -- * Agent
-  -- getLocalChecks
-  -- getLocalServices
-  -- getKnownMembers
-  -- getSelf
-  -- setNodeMaintenance
-  -- joinNode
-  -- forceNodeLeave
-  -- registerCheck'
-  -- deregisterCheck'
-  -- setCheckPass
-  -- setCheckWarn
-  -- setCheckFail
-  -- setCheckStatus
-  -- registerService
-  -- deregisterService
-  -- setServiceMaintenance
-  -- * Catalog
-  -- registerCatalogItem
-  -- deregisterCatalogItem
-  , listDatacenters'
-  , CatalogNode(..)
-  , CatalogAddresses(..)
-  , listNodes'
-  , listServices'
-  , ServiceNode(..)
-  , listServiceNodes'
-  -- listNodeServices
-  -- * Events
-  , Event(..)
-  , Node(..)
-  , Service(..)
-  , fireEvent'
-  , listEvents'
-  -- * Health Checks
-  , HealthCheck(..)
-  , getNodeChecks
-  , getNodeChecks'
-  , getServiceChecks'
-  , ServiceHealth(..)
-  , getServiceHealth'
-  , HealthCheckState(..)
-  , getChecksByState'
-  -- * Key / Value Store
-  , ConsulValue(..)
-  , getValue
-  , getValue'
-  -- updateValue'
-  -- , deleteValue'
-  -- performTransaction'
-  -- * Network Coordinates
-  , Coordinate(..)
-  , CoordinateData(..)
-  , DatacenterCoordinates(..)
-  , listDatacenterCoordinates'
-  , listNodeCoordinates'
-  -- * Operator
-  -- getRaftConfiguration
-  -- deletePeer
-  -- * Prepared Queries
-  -- createPreparedQuery
-  -- listPreparedQueries
-  -- executePreparedQuery
-  -- explainPreparedQuery
-  -- * Sessions
-  , NewSession(..)
-  , SessionId(..)
-  , NewSessionResponse(..)
-  , createSession'
-  , destroySession'
-  -- querySession
-  -- listNodeSessions
-  -- listAllActiveSessions
-  , renewSession'
-  -- * Snapshots
-  -- getStateSnapshot
-  -- restoreStateSnapshot
-  -- * Status
-  , currentLeader
-  , currentLeader'
-  , listPeers
-  , listPeers'
+  , tapfiliateAuth
+  , TapfiliateClient(..)
+  , runTapfiliate
+  , getConversion'
+  , listConversions'
+  , createConversion'
+  , addCommissionToConversion'
+  , getConversionMetadataCollection'
+  , addConversionMetadata'
+  , getConversionMetadata'
+  , setConversionMetadata'
+  , deleteConversionMetadata'
+  , getCommission'
+  , updateCommission'
+  , approveCommission'
+  , disapproveCommission'
+  , AffiliateId(..)
+  , Affiliate(..)
+  , Company(..)
+  , Address(..)
+  , Country(..)
+  , getAffiliate'
+  , listAffiliates'
+  , createAffiliate'
+  , getAffiliateMetadataCollection'
+  , addAffiliateMetadata'
+  -- , getAffiliateMetadata'
+  -- , setAffiliateMetadata'
+  -- , deleteAffiliateMetadata'
+  , ProgramId(..)
+  , Program(..)
+  , getProgram'
+  , listPrograms'
+  , addAffiliateToProgram'
+  , approveAffiliateForProgram'
+  , disapproveAffiliateForProgram'
+  , getAffiliateForProgram'
+  , getPayout'
+  , listPayouts'
+  , generatePayouts'
+  , markPayoutAsPaid'
+  , markPayoutAsUnpaid'
   ) where
+
 
 import Protolude
 
 import Data.Aeson
 import Data.Coerce
-import qualified Data.Text as T
 import Data.Hashable
 import Data.HashMap.Strict (HashMap)
+import Data.Time
 import Network.Tapfiliate.Internal
 import Network.HTTP.Client.TLS
 import Servant.API
 import Servant.Client
+import Servant.Common.Req
 
+type VaultAuth = AuthenticateReq (AuthProtect "Api-Key")
+type instance AuthClientData (AuthProtect "Api-Key") = Text
 
-newtype NodeName = NodeName Text
-  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+tapfiliateAuth :: Text -> VaultAuth
+tapfiliateAuth t = AuthenticateReq
+  (t, \tok req -> req { headers = ("Api-Key", tok) : headers req })
 
-newtype Peer = Peer Text
-  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
-
-newtype KeyPath = KeyPath [KeyPathPiece]
-  deriving (Show, Eq, Generic, Ord, Hashable, NFData, ToJSON, FromJSON)
-
-newtype KeyPathPiece = KeyPathPiece Text
-  deriving (Show, Eq, Generic, Ord, Hashable, NFData, ToJSON, FromJSON, ToHttpApiData, FromHttpApiData)
-
-keyPath :: [Text] -> KeyPath
-keyPath = coerce
-
-instance ToHttpApiData KeyPath where
-  toQueryParam (KeyPath ts) = T.intercalate "/" $ coerce ts
-
-data CatalogAddresses = CatalogAddresses
-  { catalogAddressesLan :: Text
-  , catalogAddressesWan :: Text
-  } deriving (Show)
-
-mkJson ''CatalogAddresses
-
-data CatalogNode = CatalogNode
-  { catalogNodeNode :: NodeName
-  , catalogNodeAddress :: Text
-  , catalogNodeTaggedAddresses :: CatalogAddresses
-  } deriving (Show)
-
-mkJson ''CatalogNode
-
-data ServiceNode = ServiceNode
-  { serviceNodeAddress :: Text
-  , serviceNodeTaggedAddresses :: Maybe CatalogAddresses
-  , serviceNodeCreateIndex :: Int
-  , serviceNodeModifyIndex :: Int
-  , serviceNodeNode :: NodeName
-  , serviceNodeServiceAddress :: Text
-  , serviceNodeServiceEnableTagOverride :: Bool
-  , serviceNodeServiceID :: Text
-  , serviceNodeServiceName :: Text
-  , serviceNodeServicePort :: Int
-  , serviceNodeServiceTags :: [Text]
-  } deriving (Show)
-
-mkJson ''ServiceNode
-
-data Event = Event
-  { eventID :: Text
-  , eventName :: Text
-  , eventPayload :: Maybe Text
-  , eventNodeFilter :: Text
-  , eventServiceFilter :: Text
-  , eventTagFilter :: Text
-  , eventVersion :: Int
-  , eventLTime :: Int
-  } deriving (Show)
-
-mkJson ''Event
-
-data HealthCheck = HealthCheck
-  { healthCheckNode :: NodeName
-  , healthCheckCheckID :: Text
-  , healthCheckName :: Text
-  , healthCheckStatus :: Text
-  , healthCheckNotes :: Text
-  , healthCheckOutput :: Text
-  , healthCheckServiceID :: Text
-  , healthCheckServiceName :: Text
-  } deriving (Show)
-
-mkJson ''HealthCheck
-
-data Node = Node
-  { nodeNode :: NodeName
-  , nodeAddress :: Text
-  , nodeTaggedAddresses :: HashMap Text Text
-  } deriving (Show)
-
-mkJson ''Node
-
-data Service = Service
-  { serviceID :: Text
-  , serviceService :: Text
-  , serviceTags :: Maybe [Text]
-  , serviceAddress :: Text
-  , servicePort :: Int
-  } deriving (Show)
-
-mkJson ''Service
-
-data ServiceHealth = ServiceHealth
-  { serviceHealthNode :: Node
-  , serviceHealthService :: Service
-  , serviceHealthChecks :: [HealthCheck]
-  } deriving (Show)
-
-mkJson ''ServiceHealth
-
-data HealthCheckState
-  = AnyState
-  | HealthCheckIsPassing
-  | HealthCheckIsWarning
-  | HealthCheckIsCritical
-  deriving (Show)
-
-instance ToHttpApiData HealthCheckState where
-  toUrlPiece s = case s of
-    AnyState -> "any"
-    HealthCheckIsPassing -> "passing"
-    HealthCheckIsWarning -> "warning"
-    HealthCheckIsCritical -> "critical"
-
-data ConsulValue = ConsulValue
-  { consulValueCreateIndex :: Int
-  , consulValueModifyIndex :: Int
-  , consulValueLockIndex :: Int
-  , consulValueKey :: Text
-  , consulValueFlags :: Int
-  , consulValueValue :: Text
-  , consulValueSession :: Maybe Text
-  } deriving (Show)
-
-mkJson ''ConsulValue
-
-data CoordinateData = CoordinateData
-  { coordinateDataAdjustment :: Double
-  , coordinateDataError :: Double
-  , coordinateDataHeight :: Double
-  , coordinateDataVec :: [Double]
-  } deriving (Show)
-
-mkJson ''CoordinateData
-
-data Coordinate = Coordinate
-  { coordinateNode :: NodeName
-  , coordinateCoord :: CoordinateData
-  } deriving (Show)
-
-mkJson ''Coordinate
-
-data DatacenterCoordinates = DatacenterCoordinates
-  { datacenterCoordinatesDatacenter :: Text
-  , datacenterCoordinatesCoordinates :: [Coordinate]
-  } deriving (Show)
-
-mkJson ''DatacenterCoordinates
-
-data NewSession = NewSession
-  { newSessionLockDelay :: Maybe Text
-  , newSessionName :: Maybe Text
-  , newSessionNode :: Maybe Text
-  , newSessionChecks :: [Text]
-  , newSessionBehavior :: Maybe Text
-  , newSessionTTL :: Maybe Text
-  } deriving (Show)
-
-mkJson ''NewSession
-
-newtype SessionId = SessionId Text
-  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
-
-data NewSessionResponse = NewSessionResponse
-  { newSessionResponseID :: SessionId
-  } deriving (Show)
-
-mkJson ''NewSessionResponse
-
-type ConsulM = ClientM
+type APIRoute rest = "api" :> "1.4" :> AuthProtect "Api-Key" :> rest
 type Wire = '[JSON]
-type ApiV1 rest = "v1" :> rest
-type Catalog rest = ApiV1 ("catalog" :> rest)
-type EventEndpoint rest = ApiV1 ("event" :> rest)
-type Health rest = ApiV1 ("health" :> rest)
 
-newtype Index = Index Int64
+newtype ConversionId = ConversionId Int
   deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
 
-type ConsulHeader a = Headers '[Header "X-Consul-Index" Index] a
+data Country = Country
+  { countryCode :: Text
+  , countryName :: Text
+  } deriving (Show)
+
+mkJson ''Country
+
+data Address = Address
+  { addressAddress :: Text
+  , addressAddressTwo :: Maybe Text
+  , addressPostalCode :: Text
+  , addressCity :: Text
+  , addressState :: Maybe Text
+  , addressCountry :: Country
+  } deriving (Show)
+
+mkJson ''Address
+
+data Company = Company
+  { companyName :: Maybe Text
+  , companyDescription :: Maybe Text
+  , companyAddress :: Address
+  } deriving (Show)
+
+mkJson ''Company
+
+newtype AffiliateId = AffiliateId Text
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
+data Affiliate = Affiliate
+  { affiliateId :: AffiliateId
+  , affiliateFirstname :: Text
+  , affiliateLastname :: Text
+  , affiliateEmail :: Text
+  , affiliatePassword :: Maybe Text
+  , affiliateCompany :: Maybe Company
+  , affiliateMetaData :: Object
+  } deriving (Show)
+
+mkJson ''Affiliate
+
+newtype ProgramId = ProgramId Text
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
+data Program = Program
+  { programId :: ProgramId
+  , programTitle :: Text
+  , programCurrency :: Text
+  , programCookieTime :: Int
+  } deriving (Show)
+
+mkJson ''Program
+
+type GetConversion = APIRoute ("conversions" :> Capture "conversion_id" ConversionId :> Get Wire Object)
+type ListConversions = APIRoute
+  ("conversions" :>
+  QueryParam "program_id" Text :>
+  QueryParam "external_id" Text :>
+  QueryParam "affiliate_id" AffiliateId :>
+  QueryParam "pending" Bool :>
+  QueryParam "date_from" Day :>
+  QueryParam "date_to" Day :>
+  Get Wire [Object])
+type CreateConversion = APIRoute
+  ("conversions" :>
+  QueryParam "override_max_cookie_time" Bool :>
+  ReqBody Wire Object :>
+  Post Wire Object)
+type AddCommissionToConversion = APIRoute
+  ("conversions" :>
+  Capture "conversion_id" ConversionId :>
+  "commissions" :>
+  ReqBody Wire Object :>
+  Post Wire [Object])
 
 type API =
-  Catalog ("datacenters" :> Get Wire [Text]) :<|>
-  Catalog ("nodes" :> Get Wire [CatalogNode]) :<|>
-  Catalog ("services" :> Get Wire (HashMap Text [Text])) :<|>
-  Catalog ("service" :> Capture "service" Text :> QueryParam "tag" Text :> QueryParam "near" Text :> Get Wire [ServiceNode]) :<|>
-  EventEndpoint ("fire" :> Capture "name" Text :> ReqBody '[OctetStream] LByteString :> QueryParam "node" NodeName :> QueryParam "service" Text :> QueryParam "tag" Text :> Put Wire Event) :<|>
-  EventEndpoint ("list" :> QueryParam "name" Text :> Get Wire [Event]) :<|>
-  Health ("node" :> Capture "node" NodeName :> Get Wire [HealthCheck]) :<|>
-  Health ("checks" :> Capture "service" Text :> Get Wire [HealthCheck]) :<|>
-  Health ("service" :> Capture "service" Text :> Get Wire [ServiceHealth]) :<|>
-  Health ("state" :> Capture "state" HealthCheckState :> Get Wire [HealthCheck]) :<|>
-  ApiV1 ("kv" :> CaptureAll "key" KeyPathPiece :> QueryParam "dc" Text :> QueryParam "token" Text :> QueryFlag "recurse" :> Get Wire (ConsulHeader [ConsulValue])) :<|>
-  ApiV1 ("coordinate" :> "datacenters" :> Get Wire [DatacenterCoordinates]) :<|>
-  ApiV1 ("coordinate" :> "nodes" :> Get Wire [Coordinate]) :<|>
-  ApiV1 ("session" :> "create" :> ReqBody Wire NewSession :> Put Wire SessionId) :<|>
-  ApiV1 ("session" :> "destroy" :> Capture "session" SessionId :> Put '[] NoContent) :<|>
-  ApiV1 ("session" :> "renew" :> Capture "session" SessionId :> Put Wire Object) :<|>
-  -- TODO Text -> network address
-  ApiV1 ("status" :> "leader" :> Get Wire Peer) :<|>
-  -- TODO Text -> network address
-  ApiV1 ("status" :> "peers" :> Get Wire [Peer])
+  GetConversion :<|>
+  ListConversions :<|>
+  CreateConversion :<|>
+  AddCommissionToConversion :<|>
+  APIRoute ("conversions" :>
+            Capture "conversion_id" ConversionId :>
+            "meta-data" :>
+            Get Wire Object) :<|>
+  APIRoute ("conversions" :>
+            Capture "conversion_id" ConversionId :>
+            "meta-data" :>
+            ReqBody Wire Object :>
+            PostNoContent '[] NoContent) :<|>
+  APIRoute ("conversions" :>
+            Capture "conversion_id" ConversionId :>
+            "meta-data" :>
+            Capture "key" Text :>
+            Get Wire Object) :<|>
+  APIRoute ("conversions" :>
+            Capture "conversion_id" ConversionId :>
+            "meta-data" :>
+            Capture "key" Text :>
+            ReqBody Wire Object :>
+            PostNoContent '[] NoContent) :<|>
+  APIRoute ("conversions" :>
+            Capture "conversion_id" ConversionId :>
+            "meta-data" :>
+            Capture "key" Text :>
+            DeleteNoContent '[] NoContent) :<|>
+  APIRoute ("commissions" :>
+            Capture "commission_id" Int :>
+            Get Wire Object) :<|>
+  APIRoute ("commissions" :>
+            Capture "commission_id" Int :>
+            ReqBody Wire Object :>
+            PutNoContent '[] NoContent) :<|>
+  APIRoute ("commissions" :>
+            Capture "commission_id" Int :>
+            "approval" :>
+            PutNoContent '[] NoContent) :<|>
+  APIRoute ("commissions" :>
+            Capture "commission_id" Int :>
+            "approval" :>
+            DeleteNoContent '[] NoContent) :<|>
+  APIRoute ("affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            Get Wire Affiliate) :<|>
+  APIRoute ("affiliates" :>
+            QueryParam "click_id" Text :>
+            QueryParam "source_id" Text :>
+            QueryParam "email" Text :>
+            Get Wire [Affiliate]) :<|>
+  APIRoute ("affiliates" :>
+            ReqBody Wire Affiliate :>
+            Post Wire Affiliate) :<|>
+  APIRoute ("affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            "meta-data" :>
+            Get Wire Object) :<|>
+  APIRoute ("affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            "meta-data" :>
+            ReqBody Wire Object :>
+            PutNoContent '[] NoContent) :<|>
+  -- Set meta data
+  -- Delete meta data
+  -- (MLM) Set parent
+  -- (MLM) Remove parent
+  APIRoute ("programs" :>
+            Capture "program_id" ProgramId :>
+            Get Wire Program) :<|>
+  APIRoute ("programs" :>
+            QueryParam "asset_id" Text :>
+            Get Wire [Program]) :<|>
+  APIRoute ("programs" :>
+            Capture "program_id" ProgramId :>
+            ReqBody Wire Object :>
+            Post Wire Object) :<|>
+  APIRoute ("programs" :>
+            Capture "program_id" ProgramId :>
+            "affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            "approval" :>
+            PutNoContent '[] NoContent) :<|>
+  APIRoute ("programs" :>
+            Capture "program_id" ProgramId :>
+            "affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            "approval" :>
+            DeleteNoContent '[] NoContent) :<|>
+  APIRoute ("programs" :>
+            Capture "program_id" ProgramId :>
+            "affiliates" :>
+            Capture "affiliate_id" AffiliateId :>
+            Get Wire Object) :<|>
+  APIRoute ("payouts" :>
+            Capture "payout_id" Text :>
+            Get Wire Object) :<|>
+  APIRoute ("payouts" :>
+            Get Wire [Object]) :<|>
+  APIRoute ("payouts" :>
+            ReqBody Wire Object :>
+            Post Wire [Object]) :<|>
+  APIRoute ("payouts" :>
+            Capture "payout_id" Text :>
+            "paid" :>
+            PutNoContent '[] NoContent) :<|>
+  APIRoute ("payouts" :>
+            Capture "payout_id" Text :>
+            "paid" :>
+            DeleteNoContent '[] NoContent)
 
 -- | Value-level representation of API.
 api :: Proxy API
 api = Proxy
 
-listDatacenters'
-  :: ClientM [Text]
+getConversion'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> ClientM (HashMap Text Value)
 
-listNodes'
-  :: ClientM [CatalogNode]
+listConversions'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Maybe Text
+     -> Maybe Text
+     -> Maybe AffiliateId
+     -> Maybe Bool
+     -> Maybe Day
+     -> Maybe Day
+     -> ClientM [Object]
 
-listServices'
-  :: ClientM (HashMap Text [Text])
+createConversion'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Maybe Bool -> HashMap Text Value -> ClientM (HashMap Text Value)
 
-listServiceNodes'
-  :: Text
-  -> Maybe Text
-  -> Maybe Text
-  -> ClientM [ServiceNode]
+addCommissionToConversion'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> HashMap Text Value -> ClientM [Object]
 
-fireEvent'
-  :: Text
-  -> LByteString
-  -> Maybe NodeName
-  -> Maybe Text
-  -> Maybe Text
-  -> ClientM Event
+getConversionMetadataCollection'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> ClientM (HashMap Text Value)
 
-listEvents'
-  :: Maybe Text
-  -> ClientM [Event]
+addConversionMetadata'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> HashMap Text Value -> ClientM NoContent
 
-getNodeChecks'
-  :: NodeName
-  -> ClientM [HealthCheck]
+getConversionMetadata'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> Text -> ClientM (HashMap Text Value)
 
-getServiceChecks'
-  :: Text
-  -> ClientM [HealthCheck]
+setConversionMetadata'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> Text -> HashMap Text Value -> ClientM NoContent
 
-getServiceHealth'
-  :: Text
-  -> ClientM [ServiceHealth]
+deleteConversionMetadata'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> ConversionId -> Text -> ClientM NoContent
 
-getChecksByState'
-  :: HealthCheckState
-  -> ClientM [HealthCheck]
+getCommission'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Int -> ClientM (HashMap Text Value)
 
-getValue'
-  :: [KeyPathPiece]
-  -> Maybe Text
-  -> Maybe Text
-  -> Bool
-  -> ClientM (ConsulHeader [ConsulValue])
+updateCommission'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Int -> HashMap Text Value -> ClientM NoContent
 
-createSession'
-  :: NewSession
-  -> ClientM SessionId
+approveCommission'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Int -> ClientM NoContent
 
-destroySession'
-  :: SessionId
-  -> ClientM NoContent
+disapproveCommission'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Int -> ClientM NoContent
 
-renewSession'
-  :: SessionId
-  -> ClientM Object
+getAffiliate' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> AffiliateId -> ClientM Affiliate
 
-currentLeader'
-  :: ClientM Peer
+listAffiliates'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Maybe Text -> Maybe Text -> Maybe Text -> ClientM [Affiliate]
 
-listPeers'
-  :: ClientM [Peer]
+createAffiliate'
+  :: AuthenticateReq (AuthProtect "Api-Key")
+     -> Affiliate -> ClientM Affiliate
 
-listDatacenterCoordinates'
-  :: ClientM [DatacenterCoordinates]
+getAffiliateMetadataCollection' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> AffiliateId -> ClientM (HashMap Text Value)
 
-listNodeCoordinates'
-  :: ClientM [Coordinate]
+addAffiliateMetadata' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> AffiliateId -> HashMap Text Value -> ClientM NoContent
 
-(
- listDatacenters' :<|>
- listNodes' :<|>
- listServices' :<|>
- listServiceNodes' :<|>
- fireEvent' :<|>
- listEvents' :<|>
- getNodeChecks' :<|>
- getServiceChecks' :<|>
- getServiceHealth' :<|>
- getChecksByState' :<|>
- getValue' :<|>
- listDatacenterCoordinates' :<|>
- listNodeCoordinates' :<|>
- createSession' :<|>
- destroySession' :<|>
- renewSession' :<|>
- -- sessionInfo' :<|>
- currentLeader' :<|>
- listPeers') = client api
+getProgram' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> ProgramId -> ClientM Program
 
-newtype ConsulClient = ConsulClient { fromConsulClient :: ClientEnv }
+listPrograms' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> Maybe Text -> ClientM [Program]
 
-runConsul :: ConsulClient -> ConsulM a -> ConsulResponse a
-runConsul c m = runClientM m (coerce c)
+addAffiliateToProgram' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> ProgramId -> HashMap Text Value -> ClientM (HashMap Text Value)
 
-type ConsulResponse r = IO (Either ServantError r)
+approveAffiliateForProgram' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> ProgramId -> AffiliateId -> ClientM NoContent
 
-mkClient :: IO ConsulClient
+disapproveAffiliateForProgram' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> ProgramId -> AffiliateId -> ClientM NoContent
+
+getAffiliateForProgram' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> ProgramId -> AffiliateId -> ClientM (HashMap Text Value)
+
+getPayout' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> Text -> ClientM (HashMap Text Value)
+
+listPayouts' ::
+  AuthenticateReq (AuthProtect "Api-Key") -> ClientM [Object]
+
+generatePayouts' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> HashMap Text Value -> ClientM [Object]
+
+markPayoutAsPaid' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> Text -> ClientM NoContent
+
+markPayoutAsUnpaid' ::
+  AuthenticateReq (AuthProtect "Api-Key")
+  -> Text -> ClientM NoContent
+
+(getConversion' :<|>
+ listConversions' :<|>
+ createConversion' :<|>
+ addCommissionToConversion' :<|>
+ getConversionMetadataCollection' :<|>
+ addConversionMetadata' :<|>
+ getConversionMetadata' :<|>
+ setConversionMetadata' :<|>
+ deleteConversionMetadata' :<|>
+ getCommission' :<|>
+ updateCommission' :<|>
+ approveCommission' :<|>
+ disapproveCommission' :<|>
+ getAffiliate' :<|>
+ listAffiliates' :<|>
+ createAffiliate' :<|>
+ getAffiliateMetadataCollection' :<|>
+ addAffiliateMetadata' :<|>
+ -- getAffiliateMetadata' :<|>
+ -- setAffiliateMetadata' :<|>
+ -- deleteAffiliateMetadata' :<|>
+ getProgram' :<|>
+ listPrograms' :<|>
+ addAffiliateToProgram' :<|>
+ approveAffiliateForProgram' :<|>
+ disapproveAffiliateForProgram' :<|>
+ getAffiliateForProgram' :<|>
+ getPayout' :<|>
+ listPayouts' :<|>
+ generatePayouts' :<|>
+ markPayoutAsPaid' :<|>
+ markPayoutAsUnpaid') = client api
+
+newtype TapfiliateClient = TapfiliateClient { fromTapfiliateClient :: ClientEnv }
+
+runTapfiliate :: TapfiliateClient -> TapfiliateM a -> TapfiliateResponse a
+runTapfiliate c m = runClientM m (coerce c)
+
+type TapfiliateM = ClientM
+type TapfiliateResponse r = IO (Either ServantError r)
+
+mkClient :: IO TapfiliateClient
 mkClient = do
   man <- getGlobalManager
-  u <- parseBaseUrl "http://localhost:8500"
-  return $ ConsulClient $ ClientEnv man u
-
-getNodeChecks :: ConsulClient -> NodeName -> ConsulResponse [HealthCheck]
-getNodeChecks c n = runClientM (getNodeChecks' n) $ coerce c
-
-getValue :: ConsulClient -> [KeyPathPiece] -> Maybe Text -> Maybe Text -> Bool -> ConsulResponse (ConsulHeader [ConsulValue])
-getValue c p dc tok recurse = runClientM (getValue' p dc tok recurse) $ coerce c
-
-currentLeader :: ConsulClient -> ConsulResponse Peer
-currentLeader = runClientM currentLeader' . coerce
-
-listPeers :: ConsulClient -> ConsulResponse [Peer]
-listPeers = runClientM listPeers' . coerce
+  u <- parseBaseUrl "https://tapfiliate.com"
+  return $ TapfiliateClient $ ClientEnv man u
