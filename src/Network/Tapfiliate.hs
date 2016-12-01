@@ -69,10 +69,10 @@ import Servant.API
 import Servant.Client
 import Servant.Common.Req
 
-type VaultAuth = AuthenticateReq (AuthProtect "Api-Key")
+type TapfiliateAuth = AuthenticateReq (AuthProtect "Api-Key")
 type instance AuthClientData (AuthProtect "Api-Key") = Text
 
-tapfiliateAuth :: Text -> VaultAuth
+tapfiliateAuth :: Text -> TapfiliateAuth
 tapfiliateAuth t = AuthenticateReq
   (t, \tok req -> req { headers = ("Api-Key", tok) : headers req })
 
@@ -134,6 +134,9 @@ data Program = Program
   } deriving (Show)
 
 mkJson ''Program
+
+newtype CommissionId = CommissionId Int
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
 
 type GetConversion = APIRoute ("conversions" :> Capture "conversion_id" ConversionId :> Get Wire Object)
 type ListConversions = APIRoute
@@ -275,11 +278,11 @@ api :: Proxy API
 api = Proxy
 
 getConversion'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> ClientM (HashMap Text Value)
 
 listConversions'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Maybe Text
      -> Maybe Text
      -> Maybe AffiliateId
@@ -289,110 +292,110 @@ listConversions'
      -> ClientM [Object]
 
 createConversion'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Maybe Bool -> HashMap Text Value -> ClientM (HashMap Text Value)
 
 addCommissionToConversion'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> HashMap Text Value -> ClientM [Object]
 
 getConversionMetadataCollection'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> ClientM (HashMap Text Value)
 
 addConversionMetadata'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> HashMap Text Value -> ClientM NoContent
 
 getConversionMetadata'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> Text -> ClientM (HashMap Text Value)
 
 setConversionMetadata'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> Text -> HashMap Text Value -> ClientM NoContent
 
 deleteConversionMetadata'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> ConversionId -> Text -> ClientM NoContent
 
 getCommission'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Int -> ClientM (HashMap Text Value)
 
 updateCommission'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Int -> HashMap Text Value -> ClientM NoContent
 
 approveCommission'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Int -> ClientM NoContent
 
 disapproveCommission'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Int -> ClientM NoContent
 
 getAffiliate' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> AffiliateId -> ClientM Affiliate
 
 listAffiliates'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Maybe Text -> Maybe Text -> Maybe Text -> ClientM [Affiliate]
 
 createAffiliate'
-  :: AuthenticateReq (AuthProtect "Api-Key")
+  :: TapfiliateAuth
      -> Affiliate -> ClientM Affiliate
 
 getAffiliateMetadataCollection' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> AffiliateId -> ClientM (HashMap Text Value)
 
 addAffiliateMetadata' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> AffiliateId -> HashMap Text Value -> ClientM NoContent
 
 getProgram' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> ProgramId -> ClientM Program
 
 listPrograms' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> Maybe Text -> ClientM [Program]
 
 addAffiliateToProgram' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> ProgramId -> HashMap Text Value -> ClientM (HashMap Text Value)
 
 approveAffiliateForProgram' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> ProgramId -> AffiliateId -> ClientM NoContent
 
 disapproveAffiliateForProgram' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> ProgramId -> AffiliateId -> ClientM NoContent
 
 getAffiliateForProgram' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> ProgramId -> AffiliateId -> ClientM (HashMap Text Value)
 
 getPayout' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> Text -> ClientM (HashMap Text Value)
 
 listPayouts' ::
-  AuthenticateReq (AuthProtect "Api-Key") -> ClientM [Object]
+  TapfiliateAuth -> ClientM [Object]
 
 generatePayouts' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> HashMap Text Value -> ClientM [Object]
 
 markPayoutAsPaid' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> Text -> ClientM NoContent
 
 markPayoutAsUnpaid' ::
-  AuthenticateReq (AuthProtect "Api-Key")
+  TapfiliateAuth
   -> Text -> ClientM NoContent
 
 (getConversion' :<|>
