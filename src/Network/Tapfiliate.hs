@@ -188,18 +188,18 @@ type API =
             Capture "key" Text :>
             DeleteNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
-            Capture "commission_id" Int :>
+            Capture "commission_id" CommissionId :>
             Get Wire Object) :<|>
   APIRoute ("commissions" :>
-            Capture "commission_id" Int :>
+            Capture "commission_id" CommissionId :>
             ReqBody Wire Object :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
-            Capture "commission_id" Int :>
+            Capture "commission_id" CommissionId :>
             "approval" :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
-            Capture "commission_id" Int :>
+            Capture "commission_id" CommissionId :>
             "approval" :>
             DeleteNoContent '[] NoContent) :<|>
   APIRoute ("affiliates" :>
