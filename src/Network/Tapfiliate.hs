@@ -1,8 +1,10 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -11,9 +13,13 @@ module Network.Tapfiliate
   ( API
   , api
   , mkClient
+  , getEnvAuth
   , tapfiliateAuth
   , TapfiliateClient(..)
   , runTapfiliate
+  , Conversion(..)
+  , Click(..)
+  , ConversionCommission(..)
   , getConversion'
   , listConversions'
   , createConversion'
@@ -23,6 +29,8 @@ module Network.Tapfiliate
   , getConversionMetadata'
   , setConversionMetadata'
   , deleteConversionMetadata'
+  , CommissionId(..)
+  , Commission(..)
   , getCommission'
   , updateCommission'
   , approveCommission'
@@ -62,12 +70,24 @@ import Data.Aeson
 import Data.Coerce
 import Data.Hashable
 import Data.HashMap.Strict (HashMap)
+import qualified Data.Text as T
 import Data.Time
 import Network.Tapfiliate.Internal
 import Network.HTTP.Client.TLS
 import Servant.API
 import Servant.Client
 import Servant.Common.Req
+import System.Environment
+
+data TrailingSlash = TrailingSlash
+
+instance HasClient api => HasClient (TrailingSlash :> api) where
+  type Client (TrailingSlash :> api) = Client api
+  clientWithRoute Proxy req = clientWithRoute (Proxy :: Proxy api) (appendToPath "" req)
+
+getEnvAuth :: IO TapfiliateAuth
+getEnvAuth =
+  (tapfiliateAuth . T.pack) <$> getEnv "TAPFILIATE_KEY"
 
 type TapfiliateAuth = AuthenticateReq (AuthProtect "Api-Key")
 type instance AuthClientData (AuthProtect "Api-Key") = Text
@@ -79,8 +99,75 @@ tapfiliateAuth t = AuthenticateReq
 type APIRoute rest = "api" :> "1.4" :> AuthProtect "Api-Key" :> rest
 type Wire = '[JSON]
 
+newtype CommissionId = CommissionId Int
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
 newtype ConversionId = ConversionId Int
   deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
+newtype PayoutId = PayoutId Int
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
+newtype ProgramId = ProgramId Text
+  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+
+data NewClick = NewClick
+  { newClickId :: Text
+  } deriving (Show)
+
+mkJson ''NewClick
+
+data OverrideCommission = OverrideCommission
+  { overrideCommissionSubAmount :: Double
+  , overrideCommissionComissionType :: Text
+  } deriving (Show)
+
+mkJson ''OverrideCommission
+
+data NewConversion = NewConversion
+  { newConversionClick :: Maybe NewClick
+  , newConversionCoupon :: Text
+  , newConversionVisitorId :: Maybe Text
+  , newConversionExternalId :: Text
+  , newConversionAmount :: Double
+  , newConversionCommissionType :: Text
+  , newConversionCommissions :: Maybe [OverrideCommission]
+  , newConversionMetadata :: Object
+  , newConversionProgramGroup :: ProgramId
+  } deriving (Show)
+
+mkJson ''NewConversion
+
+data Click = Click
+  { clickCreatedAt :: UTCTime
+  } deriving (Show)
+
+mkJson ''Click
+
+data ConversionCommission = ConversionCommission
+  { conversionCommissionCreatedAt :: UTCTime
+  , conversionCommissionId :: CommissionId
+  , conversionCommissionAmount :: Double
+  , conversionCommissionApproved :: Maybe Bool
+  , conversionCommissionType :: Text
+  , conversionCommissionPayout :: Maybe PayoutId
+  , conversionCommissionCommissionType :: Text
+  , conversionCommissionConversionSubAmount :: Double
+  , conversionCommissionComment :: Maybe Text
+  } deriving (Show)
+
+mkJson ''ConversionCommission
+
+data Conversion = Conversion
+  { conversionId :: ConversionId
+  , conversionMetaData :: Object
+  , conversionExternalId :: Text
+  , conversionAmount :: Double
+  , conversionClick :: Maybe Click
+  , conversionCommissions :: [ConversionCommission]
+  } deriving (Show)
+
+mkJson ''Conversion
 
 data Country = Country
   { countryCode :: Text
@@ -103,7 +190,7 @@ mkJson ''Address
 data Company = Company
   { companyName :: Maybe Text
   , companyDescription :: Maybe Text
-  , companyAddress :: Address
+  , companyAddress :: Maybe Address
   } deriving (Show)
 
 mkJson ''Company
@@ -123,9 +210,6 @@ data Affiliate = Affiliate
 
 mkJson ''Affiliate
 
-newtype ProgramId = ProgramId Text
-  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
-
 data Program = Program
   { programId :: ProgramId
   , programTitle :: Text
@@ -135,10 +219,20 @@ data Program = Program
 
 mkJson ''Program
 
-newtype CommissionId = CommissionId Int
-  deriving (Show, Eq, Generic, Ord, Hashable, ToHttpApiData, FromHttpApiData, NFData, ToJSON, FromJSON)
+data Commission = Commission
+  { commissionId :: CommissionId
+  , commissionCreatedAt :: UTCTime
+  , commissionAmount :: Double
+  , commissionApproved :: Maybe Bool
+  , commissionType :: Text
+  , commissionCommissionType :: Text
+  , commissionConversionSubAmount :: Double
+  , commissionComment :: Text
+  } deriving (Show)
 
-type GetConversion = APIRoute ("conversions" :> Capture "conversion_id" ConversionId :> Get Wire Object)
+mkJson ''Commission
+
+type GetConversion = APIRoute ("conversions" :> Capture "conversion_id" ConversionId :> Get Wire Conversion)
 type ListConversions = APIRoute
   ("conversions" :>
   QueryParam "program_id" Text :>
@@ -147,17 +241,20 @@ type ListConversions = APIRoute
   QueryParam "pending" Bool :>
   QueryParam "date_from" Day :>
   QueryParam "date_to" Day :>
-  Get Wire [Object])
+  TrailingSlash :>
+  Get Wire [Conversion])
 type CreateConversion = APIRoute
   ("conversions" :>
   QueryParam "override_max_cookie_time" Bool :>
-  ReqBody Wire Object :>
-  Post Wire Object)
+  ReqBody Wire NewConversion :>
+  TrailingSlash :>
+  Post Wire Conversion)
 type AddCommissionToConversion = APIRoute
   ("conversions" :>
   Capture "conversion_id" ConversionId :>
   "commissions" :>
   ReqBody Wire Object :>
+  TrailingSlash :>
   Post Wire [Object])
 
 type API =
@@ -168,62 +265,76 @@ type API =
   APIRoute ("conversions" :>
             Capture "conversion_id" ConversionId :>
             "meta-data" :>
+            TrailingSlash :>
             Get Wire Object) :<|>
   APIRoute ("conversions" :>
             Capture "conversion_id" ConversionId :>
             "meta-data" :>
             ReqBody Wire Object :>
+            TrailingSlash :>
             PostNoContent '[] NoContent) :<|>
   APIRoute ("conversions" :>
             Capture "conversion_id" ConversionId :>
             "meta-data" :>
             Capture "key" Text :>
+            TrailingSlash :>
             Get Wire Object) :<|>
   APIRoute ("conversions" :>
             Capture "conversion_id" ConversionId :>
             "meta-data" :>
             Capture "key" Text :>
             ReqBody Wire Object :>
+            TrailingSlash :>
             PostNoContent '[] NoContent) :<|>
   APIRoute ("conversions" :>
             Capture "conversion_id" ConversionId :>
             "meta-data" :>
             Capture "key" Text :>
+            TrailingSlash :>
             DeleteNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
             Capture "commission_id" CommissionId :>
-            Get Wire Object) :<|>
+            TrailingSlash :>
+            Get Wire Commission) :<|>
   APIRoute ("commissions" :>
             Capture "commission_id" CommissionId :>
-            ReqBody Wire Object :>
+            ReqBody Wire Commission :>
+            TrailingSlash :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
             Capture "commission_id" CommissionId :>
             "approval" :>
+            TrailingSlash :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("commissions" :>
             Capture "commission_id" CommissionId :>
             "approval" :>
+            TrailingSlash :>
             DeleteNoContent '[] NoContent) :<|>
   APIRoute ("affiliates" :>
             Capture "affiliate_id" AffiliateId :>
+            TrailingSlash :>
             Get Wire Affiliate) :<|>
   APIRoute ("affiliates" :>
             QueryParam "click_id" Text :>
             QueryParam "source_id" Text :>
             QueryParam "email" Text :>
+            TrailingSlash :>
             Get Wire [Affiliate]) :<|>
   APIRoute ("affiliates" :>
             ReqBody Wire Affiliate :>
+            TrailingSlash :>
             Post Wire Affiliate) :<|>
   APIRoute ("affiliates" :>
             Capture "affiliate_id" AffiliateId :>
             "meta-data" :>
+            TrailingSlash :>
             Get Wire Object) :<|>
   APIRoute ("affiliates" :>
             Capture "affiliate_id" AffiliateId :>
             "meta-data" :>
             ReqBody Wire Object :>
+            TrailingSlash :>
             PutNoContent '[] NoContent) :<|>
   -- Set meta data
   -- Delete meta data
@@ -231,46 +342,57 @@ type API =
   -- (MLM) Remove parent
   APIRoute ("programs" :>
             Capture "program_id" ProgramId :>
+            TrailingSlash :>
             Get Wire Program) :<|>
   APIRoute ("programs" :>
             QueryParam "asset_id" Text :>
+            TrailingSlash :>
             Get Wire [Program]) :<|>
   APIRoute ("programs" :>
             Capture "program_id" ProgramId :>
             ReqBody Wire Object :>
+            TrailingSlash :>
             Post Wire Object) :<|>
   APIRoute ("programs" :>
             Capture "program_id" ProgramId :>
             "affiliates" :>
             Capture "affiliate_id" AffiliateId :>
             "approval" :>
+            TrailingSlash :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("programs" :>
             Capture "program_id" ProgramId :>
             "affiliates" :>
             Capture "affiliate_id" AffiliateId :>
             "approval" :>
+            TrailingSlash :>
             DeleteNoContent '[] NoContent) :<|>
   APIRoute ("programs" :>
             Capture "program_id" ProgramId :>
             "affiliates" :>
             Capture "affiliate_id" AffiliateId :>
+            TrailingSlash :>
             Get Wire Object) :<|>
   APIRoute ("payouts" :>
             Capture "payout_id" Text :>
+            TrailingSlash :>
             Get Wire Object) :<|>
   APIRoute ("payouts" :>
+            TrailingSlash :>
             Get Wire [Object]) :<|>
   APIRoute ("payouts" :>
             ReqBody Wire Object :>
+            TrailingSlash :>
             Post Wire [Object]) :<|>
   APIRoute ("payouts" :>
             Capture "payout_id" Text :>
             "paid" :>
+            TrailingSlash :>
             PutNoContent '[] NoContent) :<|>
   APIRoute ("payouts" :>
             Capture "payout_id" Text :>
             "paid" :>
+            TrailingSlash :>
             DeleteNoContent '[] NoContent)
 
 -- | Value-level representation of API.
@@ -279,7 +401,7 @@ api = Proxy
 
 getConversion'
   :: TapfiliateAuth
-     -> ConversionId -> ClientM (HashMap Text Value)
+     -> ConversionId -> ClientM Conversion
 
 listConversions'
   :: TapfiliateAuth
@@ -289,11 +411,11 @@ listConversions'
      -> Maybe Bool
      -> Maybe Day
      -> Maybe Day
-     -> ClientM [Object]
+     -> ClientM [Conversion]
 
 createConversion'
   :: TapfiliateAuth
-     -> Maybe Bool -> HashMap Text Value -> ClientM (HashMap Text Value)
+     -> Maybe Bool -> NewConversion -> ClientM Conversion
 
 addCommissionToConversion'
   :: TapfiliateAuth
@@ -321,19 +443,19 @@ deleteConversionMetadata'
 
 getCommission'
   :: TapfiliateAuth
-     -> Int -> ClientM (HashMap Text Value)
+     -> CommissionId -> ClientM Commission
 
 updateCommission'
   :: TapfiliateAuth
-     -> Int -> HashMap Text Value -> ClientM NoContent
+     -> CommissionId -> Commission -> ClientM NoContent
 
 approveCommission'
   :: TapfiliateAuth
-     -> Int -> ClientM NoContent
+     -> CommissionId -> ClientM NoContent
 
 disapproveCommission'
   :: TapfiliateAuth
-     -> Int -> ClientM NoContent
+     -> CommissionId -> ClientM NoContent
 
 getAffiliate' ::
   TapfiliateAuth
