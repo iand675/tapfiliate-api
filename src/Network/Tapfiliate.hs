@@ -17,6 +17,8 @@ module Network.Tapfiliate
   , tapfiliateAuth
   , TapfiliateClient(..)
   , runTapfiliate
+  , NewConversion(..)
+  , NewClick(..)
   , Conversion(..)
   , Click(..)
   , ConversionCommission(..)
@@ -31,6 +33,7 @@ module Network.Tapfiliate
   , deleteConversionMetadata'
   , CommissionId(..)
   , Commission(..)
+  , OverrideCommission(..)
   , getCommission'
   , updateCommission'
   , approveCommission'
@@ -79,7 +82,7 @@ import Servant.Client
 import Servant.Common.Req
 import System.Environment
 
-data TrailingSlash = TrailingSlash
+data TrailingSlash
 
 instance HasClient api => HasClient (TrailingSlash :> api) where
   type Client (TrailingSlash :> api) = Client api
