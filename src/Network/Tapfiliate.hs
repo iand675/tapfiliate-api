@@ -16,6 +16,7 @@ module Network.Tapfiliate
   , getEnvAuth
   , tapfiliateAuth
   , TapfiliateClient(..)
+  , TapfiliateM
   , runTapfiliate
   , NewConversion(..)
   , NewClick(..)
