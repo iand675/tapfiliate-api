@@ -24,6 +24,7 @@ testAPI m = do
 tests :: TestTree
 tests = testGroup "Tapfiliate API"
   [ testCase "List affiliates" $ do
-      testAPI $ do
-        return ()
+      auth <- getEnvAuth
+      void $ testAPI $ do
+        listAffiliates' auth Nothing Nothing Nothing
   ]
